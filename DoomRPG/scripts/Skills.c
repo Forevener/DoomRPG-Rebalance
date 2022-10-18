@@ -1541,6 +1541,9 @@ NamedScript Console bool Weaken(SkillLevelInfo *SkillLevel, void *Data)
     // Red Aura retaliates! (if it still can)
     SetInventory("DRPGMonsterEPAttacked", 1);
 
+    // Recalculate monster stats
+    MonsterStatsHandler();
+
     // Reset Activator
     SetActivator(Players(PlayerNum).TID);
 
@@ -1860,6 +1863,8 @@ NamedScript Console bool Disruption(SkillLevelInfo *SkillLevel, void *Data)
     }
 
     SetInventory("DRPGMonsterDisrupted", 35 * 30);
+    // Aura disruption handler
+    MonsterDisruptionHandler();
 
     // Move activation back to the user
     SetActivator(Players(PlayerNum).TID);
@@ -2367,7 +2372,11 @@ NamedScript Console bool Summon(SkillLevelInfo *SkillLevel, void *Data)
         Stats->Threat = CalculateMonsterThreatLevel(&Monsters[GetMonsterID(NewID)]);
         Stats->Flags |= MF_NOXP;
         Stats->Flags |= MF_NODROPS;
-        Stats->NeedReinit = true;
+
+        if (SetActivator(Stats->TID))
+            MonsterInitStats(SF_RECREATE);
+
+        SetActivator(Player.TID);
 
         return true;
     }

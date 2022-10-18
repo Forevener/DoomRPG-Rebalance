@@ -1007,7 +1007,8 @@ NamedScript void AddMiniboss()
     for (int i = 0; i < AURA_MAX; i++)
         Monsters[Chosen].AuraAdd[i] = true;
 
-    Monsters[Chosen].NeedReinit = true;
+    if (SetActivator(Monsters[Chosen].TID))
+        MonsterInitStats(SF_RECREATE);
 
     // EVIL LAUGH OF WARNING
     if (Monsters[Chosen].Threat >= 10)
@@ -2529,7 +2530,8 @@ NamedScript void HellUnleashedSpawnMonsters()
             // Setup Stats
             Stats = &Monsters[GetMonsterID(TID)];
             Stats->LevelAdd += (int)CurrentLevel->LevelAdd;
-            Stats->NeedReinit = true;
+            if (SetActivator(Stats->TID))
+                MonsterInitStats(SF_RECREATE);
         }
         // Stagger the loop here so that we can make monsters appear to spawn in semi-randomly
         Delay(Random(1, 10));
@@ -2553,6 +2555,8 @@ NamedScript void HarmonizedDestructionEvent()
         if (!Monsters[i].Init)
             continue;
 
+        bool SkipHandler = Monsters[i].HasAura;
+
         if (CurrentLevel->AuraType == AURA_MAX)
         {
             for (int j = 0; j < AURA_MAX; j++)
@@ -2565,6 +2569,9 @@ NamedScript void HarmonizedDestructionEvent()
 
         Monsters[i].HasAura = true;
         Monsters[i].Flags &= MF_NOAURAGEN; // Don't let our aura get overwritten
+
+        if (!SkipHandler && SetActivator(Monsters[i].TID))
+            MonsterAuraDisplayHandler();
     }
 
     // Level feeling
@@ -2748,7 +2755,8 @@ NamedScript void DoomsdayEvent()
 
         Monsters[i].AuraAdd[AURA_RED] = true;
 
-        Monsters[i].NeedReinit = true;
+        if (SetActivator(Monsters[i].TID))
+            MonsterInitStats(SF_RECREATE);
     }
 
     // Calculate Doomsday time
@@ -2947,7 +2955,9 @@ NamedScript void DarkZoneEvent()
             for (int a = 0; a < AURA_MAX; ++a)
                 Monsters[i].AuraAdd[a] = true;
 
-            Monsters[i].NeedReinit = true;
+            if (SetActivator(Monsters[i].TID))
+                MonsterInitStats(SF_RECREATE);
+
             SpawnSpotFacing("ArchvileFire", Monsters[i].TID, 0);
             break;
         }
@@ -2988,7 +2998,8 @@ NamedScript void SinstormEvent()
         for (int j = 0; j < AURA_MAX; j++)
             Monsters[i].AuraAdd[j] = true;
 
-        Monsters[i].NeedReinit = true;
+        if (SetActivator(Monsters[i].TID))
+            MonsterInitStats(SF_RECREATE);
     }
 
     SetMusic("");
@@ -3284,7 +3295,8 @@ NamedScript void WhispersofDarknessEvent()
             MonsterIndex = GetMonsterID(TID);
 
 //          Monsters[MonsterIndex].LevelAdd += ((250 / 8) * PlayerCount());
-            Monsters[MonsterIndex].NeedReinit = true;
+            if (SetActivator(Monsters[MonsterIndex].TID))
+                MonsterInitStats(SF_RECREATE);
 
             // Shadow Aura
             for (int i = 0; i < AURA_MAX; i++)

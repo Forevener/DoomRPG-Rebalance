@@ -580,7 +580,6 @@ int NewMonsterID()
     Monsters[CurrentID].Speed = 0;
     Monsters[CurrentID].Height = 0;
     Monsters[CurrentID].Radius = 0;
-    Monsters[CurrentID].NeedReinit = false;
     Monsters[CurrentID].HealthBar = false;
     Monsters[CurrentID].Named = false;
     Monsters[CurrentID].Reinforcement = false;
@@ -733,6 +732,9 @@ NamedScript DECORATE void MonsterInit(int Flags)
     // Save the Render Type
     Stats->RenderStyle = GetActorProperty(0, APROP_RenderStyle);
 
+    // Damage Numbers
+    DamageNumbers();
+
     // Stat-Change Handling
     MonsterStatsHandler();
 
@@ -776,7 +778,7 @@ NamedScript Console void MonsterSet(int Level, int Aura, int Flags, bool Decorat
         Stats->Flags = Flags;
 
     // Needs reinitialization to apply new info
-    Stats->NeedReinit = true;
+    MonsterInitStats(SF_RECREATE);
 }
 
 // Give the targeted monster a Shadow Aura (mainly for debugging)
@@ -793,7 +795,7 @@ NamedScript Console void MonsterSetShadow()
         Stats->AuraAdd[i] = true;
 
     // Needs reinitialization to apply new info
-    Stats->NeedReinit = true;
+    MonsterInitStats(SF_RECREATE);
 }
 
 // Modify the targeted monsters stats (mainly for debugging)
@@ -832,6 +834,8 @@ NamedScript Console void MonsterModStat(int Stat, int Value)
         Stats->Luck = Value;
         break;
     }
+
+    MonsterStatsHandler();
 }
 
 // Dump the targeted monster's stats to the console
@@ -1277,6 +1281,9 @@ OptionalArgs(1) NamedScript void MonsterInitStats(int StatFlags)
     Stats->HasAura = MonsterHasAura(Stats);
     Stats->HasShadowAura = MonsterHasShadowAura(Stats);
 
+    if (Stats->HasAura)
+        MonsterAuraDisplayHandler();
+
     // Calculate Aura time
     Stats->Aura.Time = (30 * 35) + (int)((fixed)Stats->Energy * 0.57) * 35;
 
@@ -1369,13 +1376,10 @@ OptionalArgs(1) NamedScript void MonsterInitStats(int StatFlags)
         Stats->Named = true;
     }
 
-    // Reinitialize the stats handler if recreation has occurred
+    Delay(1);
+
     if (StatFlags & SF_RECREATE)
-    {
-        Stats->NeedReinit = false;
-        Delay(1);
         MonsterStatsHandler();
-    }
 }
 
 NamedScript bool MonsterHasTarget()
@@ -1653,73 +1657,22 @@ Start:
 
 NamedScript void MonsterStatsHandler()
 {
-    if (CheckInventory("DRPGMonsterStatsHandler"))
-        return;
-
-    GiveInventory("DRPGMonsterStatsHandler", 1);
-
     // Delay Stagger
-    Delay(35 + (GetMonsterID(0) % 4));
+    Delay(10);
 
     // Pointer
     MonsterStatsPtr Stats = &Monsters[GetMonsterID(0)];
 
-    // Init Toaster Mode
-    bool ToasterMod = GetCVar("drpg_toaster");
-
-    // Calculate delay time
-    int DelayTime = 4;
-    if (ToasterMod)
-        DelayTime = 15;
-
-    int OldStrength;
-    int OldDefense;
-    int OldCapacity;
-    int OldVitality;
-    int OldAgility;
-    int OldRegeneration;
-    int OldEnergy;
-    int OldLuck;
     int StolenCredits;
     int HealthPercentage;
     int LevelNum = CurrentLevel->LevelNum;
-    int PopoffsDrawDist = GetCVar("drpg_popoffs_drawdistance");
-    bool StatsChanged;
-    bool HasAuraDisplay = false;
-    bool MonsterWasDisrupted = false;
-    bool HasDamageNumbers = false;
     bool Friendly = GetActorProperty(0, APROP_Friendly); // Sanity check for when APROP_Friendly gets removed from summons
 
-Start:
-
-    if (!CheckInventory("DRPGMonsterStatsHandler"))
-        return;
-
     if (GetActorProperty(0, APROP_Health) <= 0)
-    {
-        if (OldStrength)
-        {
-            OldStrength = 0;
-            OldDefense = 0;
-            OldCapacity = 0;
-            OldVitality = 0;
-            OldAgility = 0;
-            OldRegeneration = 0;
-            OldEnergy = 0;
-            OldLuck = 0;
-        }
         return;
-    }
 
     if (ClassifyActor(0) & ACTOR_WORLD)
         return;
-
-    if (Stats->NeedReinit)
-    {
-        MonsterInitStats(SF_RECREATE);
-        TakeInventory("DRPGMonsterStatsHandler", 1);
-        return;
-    }
 
     // Monster is no longer friendly, remove their summon bonuses and species
     // This causes issues with infighting and I don't remember why I did this in the first place
@@ -1739,117 +1692,84 @@ Start:
     // Cap Level and Stats
     CapMonsterStats(Stats);
 
-    // Strength
-    if (Stats->Strength != OldStrength)
+    if (GetActorProperty(0, APROP_Friendly) || Stats->Flags & MF_BOSS || Stats->Flags & MF_MEGABOSS)
+        SetActorPropertyFixed(0, APROP_DamageMultiplier, 1.0 + (((fixed)(Stats->Strength * (fixed)GameSkill()) / 400.0)));
+    else
+        SetActorPropertyFixed(0, APROP_DamageMultiplier, 1.0 + (((fixed)(Stats->Strength * (fixed)GameSkill()) / 400.0) + ((fixed)LevelNum / (GetCVar("drpg_ws_use_wads") * 25.0))));
+
+    fixed DamageFactor;
+
+    if (GetActorProperty(0, APROP_Friendly))
+        DamageFactor = 1.0 - ((fixed)Stats->Defense / 400.0);
+    else
+        DamageFactor = 1.0 - (((fixed)Stats->Defense / 400.0) + ((fixed)LevelNum / (GetCVar("drpg_ws_use_wads") * 100.0)));
+
+    if (DamageFactor < 0.251)
+        DamageFactor = 0.251;
+
+    SetActorPropertyFixed(0, APROP_DamageFactor, DamageFactor);
+
+    StolenCredits = 0;
+    if (CheckInventory("DRPGCredits") > Stats->Capacity)
+        StolenCredits = CheckInventory("DRPGCredits") - Stats->Capacity;
+
+    // Calculation of credits depending of WADs that you plan to go through
+    CalculateMonsterCredits(Stats, StolenCredits);
+
+    SetActorPropertyFixed(0, APROP_Speed, CalculateMonsterSpeed(Stats));
+
+    HealthPercentage = 100;
+    if (Stats->HealthMax > 0)
+        HealthPercentage = (long long)GetActorProperty(0, APROP_Health) * 100 / Stats->HealthMax;
+    Stats->HealthMax = CalculateMonsterMaxHealth(Stats);
+
+    SetActorProperty(0, APROP_Health, (long long)Stats->HealthMax * HealthPercentage / 100);
+
+    // Re-calculate the monster's threat level
+    Stats->Threat = CalculateMonsterThreatLevel(Stats);
+
+    if (GetActorProperty(0, APROP_Friendly) && CheckInventory("DRPGAugTokenSummoner"))
     {
-        StatsChanged = true;
-
-        if (GetActorProperty(0, APROP_Friendly) || Stats->Flags & MF_BOSS || Stats->Flags & MF_MEGABOSS)
-            SetActorPropertyFixed(0, APROP_DamageMultiplier, 1.0 + (((fixed)(Stats->Strength * (fixed)GameSkill()) / 400.0)));
-        else
-            SetActorPropertyFixed(0, APROP_DamageMultiplier, 1.0 + (((fixed)(Stats->Strength * (fixed)GameSkill()) / 400.0) + ((fixed)LevelNum / (GetCVar("drpg_ws_use_wads") * 25.0))));
-
-        OldStrength = Stats->Strength;
-    }
-
-    // Defense
-    if (Stats->Defense != OldDefense)
-    {
-        StatsChanged = true;
-        fixed DamageFactor;
-
-        if (GetActorProperty(0, APROP_Friendly))
-            DamageFactor = 1.0 - ((fixed)Stats->Defense / 400.0);
-        else
-            DamageFactor = 1.0 - (((fixed)Stats->Defense / 400.0) + ((fixed)LevelNum / (GetCVar("drpg_ws_use_wads") * 100.0)));
-
-        if (DamageFactor < 0.251)
-            DamageFactor = 0.251;
-
-        SetActorPropertyFixed(0, APROP_DamageFactor, DamageFactor);
-
-        OldDefense = Stats->Defense;
-    }
-
-    // Capacity
-    if (Stats->Capacity != OldCapacity)
-    {
-        StatsChanged = true;
-
-        StolenCredits = 0;
-        if (CheckInventory("DRPGCredits") > OldCapacity)
-            StolenCredits = CheckInventory("DRPGCredits") - OldCapacity;
-
-        // Calculation of credits depending of WADs that you plan to go through
-        CalculateMonsterCredits(Stats, StolenCredits);
-
-        OldCapacity = Stats->Capacity;
-    }
-
-    // Agility
-    if (Stats->Agility != OldAgility)
-    {
-        StatsChanged = true;
-
-        SetActorPropertyFixed(0, APROP_Speed, CalculateMonsterSpeed(Stats));
-        OldAgility = Stats->Agility;
-    }
-
-    // Vitality
-    if (Stats->Vitality != OldVitality)
-    {
-        StatsChanged = true;
-
-        HealthPercentage = 100;
-        if (Stats->HealthMax > 0)
-            HealthPercentage = (long long)GetActorProperty(0, APROP_Health) * 100 / Stats->HealthMax;
-        Stats->HealthMax = CalculateMonsterMaxHealth(Stats);
-
-        if (OldVitality == 0)
+        for (int i = 0; i < MAX_PLAYERS; i++)
         {
-            // This will trigger if the monster was previously dead and revived, so heal up fully
-            SetActorProperty(0, APROP_Health, Stats->HealthMax);
+            if (!PlayerInGame(i) || Players(i).Summons == 0) continue;
+
+            for (int j = 0; j < Players(i).Summons; j++)
+            {
+                if (Players(i).SummonTID[j] == Stats->TID)
+                {
+                    if (!Players(i).Augs.Active[AUG_SUMMONER])
+                    {
+                        int Health = GetActorProperty(0, APROP_Health);
+
+                        MonsterInitStats();
+
+                        if (Health > Stats->HealthMax)
+                            SetActorProperty(0, APROP_Health, Stats->HealthMax);
+                        else
+                            SetActorProperty(0, APROP_Health, Health);
+
+                        SetInventory("DRPGSummonedRegenerationBoosterToken", 0);
+                        SetInventory("DRPGAugTokenSummoner", 0);
+                    }
+                }
+            }
         }
-        else
-        {
-            SetActorProperty(0, APROP_Health, (long long)Stats->HealthMax * HealthPercentage / 100);
-        }
-
-        OldVitality = Stats->Vitality;
     }
+}
 
-    // Nothing much to do for these
+NamedScript void MonsterDisruptionHandler()
+{
+    // Delay Stagger
+    Delay(10);
 
-    // Regeneration
-    if (Stats->Regeneration != OldRegeneration)
-    {
-        StatsChanged = true;
-        OldRegeneration = Stats->Regeneration;
-    }
+    // Pointer
+    MonsterStatsPtr Stats = &Monsters[GetMonsterID(0)];
 
-    // Energy
-    if (Stats->Energy != OldEnergy)
-    {
-        StatsChanged = true;
-        OldEnergy = Stats->Energy;
-    }
+    bool MonsterWasDisrupted = false;
 
-    // Luck
-    if (Stats->Luck != OldLuck)
-    {
-        StatsChanged = true;
-        OldLuck = Stats->Luck;
-    }
+Start:
 
-    if (StatsChanged)
-    {
-        // Re-calculate the monster's threat level
-        Stats->Threat = CalculateMonsterThreatLevel(Stats);
-
-        StatsChanged = false;
-    }
-
-    // Disruption timer
     if (CheckInventory("DRPGMonsterDisrupted"))
     {
         if (!MonsterWasDisrupted)
@@ -1890,58 +1810,11 @@ Start:
             if (Stats->Aura.Type[AURA_ORANGE].Active)
                 MonsterOrangeAuraCheck(true);
 
-            MonsterWasDisrupted = false;
+            return;
         }
     }
 
-    if (GetActorProperty(0, APROP_Friendly) && CheckInventory("DRPGAugTokenSummoner"))
-    {
-        for (int i = 0; i < MAX_PLAYERS; i++)
-        {
-            if (!PlayerInGame(i) || Players(i).Summons == 0) continue;
-
-            for (int j = 0; j < Players(i).Summons; j++)
-            {
-                if (Players(i).SummonTID[j] == Stats->TID)
-                {
-                    if (!Players(i).Augs.Active[AUG_SUMMONER])
-                    {
-                        int Health = GetActorProperty(0, APROP_Health);
-
-                        MonsterInitStats();
-
-                        if (Health > Stats->HealthMax)
-                            SetActorProperty(0, APROP_Health, Stats->HealthMax);
-                        else
-                            SetActorProperty(0, APROP_Health, Health);
-
-                        SetInventory("DRPGSummonedRegenerationBoosterToken", 0);
-                        SetInventory("DRPGAugTokenSummoner", 0);
-                    }
-                }
-            }
-        }
-    }
-
-    // Aura Spawner
-    if (!HasAuraDisplay && (Stats->HasAura || Stats->Target > 0 || (GetActorProperty(0, APROP_Friendly) && !CurrentLevel->UACBase)))
-    {
-        MonsterAuraDisplayHandler();
-        HasAuraDisplay = true;
-    }
-
-    // Damage Numbers
-    if (!HasDamageNumbers && !ActorNotSeePlayers(0, PopoffsDrawDist, true))
-    {
-        DamageNumbers();
-        HasDamageNumbers = true;
-    }
-
-    // Delay if Toaster Mode on
-    if (ToasterMod)
-        while (ActorNotSeePlayers(0, 0, true)) Delay(35);
-
-    Delay(DelayTime);
+    Delay(1);
     goto Start;
 }
 
@@ -3391,6 +3264,9 @@ void MonsterLevelup(MonsterStatsPtr Stats)
 
     if (CheckInventory("DRPGMonsterLevelup"))
         TakeInventory("DRPGMonsterLevelup", 1);
+
+    if (SetActivator(Stats->TID))
+        MonsterStatsHandler();
 }
 
 void CapMonsterStats(MonsterStatsPtr Stats)

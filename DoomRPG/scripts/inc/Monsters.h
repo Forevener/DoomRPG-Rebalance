@@ -31,6 +31,7 @@ NamedScript Console  void MonsterDamaged(int, int);
 
 OptionalArgs(1) NamedScript void MonsterInitStats(int);
 NamedScript void MonsterStatsHandler();
+NamedScript void MonsterDisruptionHandler();
 NamedScript void MonsterAuraDisplayHandler();
 NamedScript void MonsterAggressionHandler();
 NamedScript void MonsterFriendlyTeleport();

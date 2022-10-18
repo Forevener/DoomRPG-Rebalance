@@ -127,7 +127,8 @@ NamedScript void InitMission()
             for (int i = 0; i < AURA_MAX; i++)
                 Monsters[Chosen].AuraAdd[i] = true;
 
-            Monsters[Chosen].NeedReinit = true;
+            if (SetActivator(Monsters[Chosen].TID))
+                MonsterInitStats(SF_RECREATE);
 
             // EVIL LAUGH OF WARNING
             if (Monsters[Chosen].Threat >= 10)

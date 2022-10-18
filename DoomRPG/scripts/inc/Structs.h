@@ -295,7 +295,6 @@ struct MonsterStats_S
 
     // Flags
     bool Init;
-    bool NeedReinit;
     bool HealthBar;
     bool Named;
     bool Reinforcement;
